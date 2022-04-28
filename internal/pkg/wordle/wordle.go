@@ -16,7 +16,7 @@ type Handle interface {
 }
 
 type HandleImplementor struct {
-	trieRef  *trie
+	*trie
 	guessRef *guessWork
 }
 
@@ -26,7 +26,7 @@ func New(words []string, wordLen int) *HandleImplementor {
 	handle := newHandle(wordLen)
 
 	for _, word := range words {
-		handle.insert(word)
+		handle.Insert(word)
 	}
 
 	handle.guessRef = newGuess(handle, wordLen)
@@ -36,7 +36,7 @@ func New(words []string, wordLen int) *HandleImplementor {
 
 func newHandle(wordLen int) *HandleImplementor {
 	return &HandleImplementor{
-		trieRef: newTrie(),
+		trie: newTrie(),
 	}
 }
 
@@ -48,7 +48,7 @@ func newNode() *node {
 	return &node{children: make(map[byte]*node)}
 }
 
-func (t *trie) insert(word string) {
+func (t *trie) Insert(word string) {
 	nodeRef := t.root
 
 	for i := 0; i < len(word); i++ {
@@ -62,7 +62,7 @@ func (t *trie) insert(word string) {
 	nodeRef.word = true
 }
 
-func (t *trie) lookup(word string) bool {
+func (t *trie) Lookup(word string) bool {
 	nodeRef := t.root
 
 	for i := 0; i < len(word); i++ {
@@ -75,7 +75,7 @@ func (t *trie) lookup(word string) bool {
 	return nodeRef.word
 }
 
-func (t *trie) autoComplete(prefix string,
+func (t *trie) AutoComplete(prefix string,
 	wordLen int, filter func(string) bool) []string {
 	var res []string
 	nodeRef := t.root
@@ -116,7 +116,7 @@ func (t *trie) complete(nodeRef *node, wordLen int,
 	}
 }
 
-func (t *trie) autoCompleteSubstring(substring string, startLocation, wordLen int,
+func (t *trie) AutoCompleteSubstring(substring string, startLocation, wordLen int,
 	filter func(string) bool) []string {
 	nodeRef := t.root
 	level := 0
@@ -133,7 +133,7 @@ func (t *trie) autoCompleteSubstring(substring string, startLocation, wordLen in
 
 		return res
 	} else {
-		return t.autoComplete(substring, wordLen, filter)
+		return t.AutoComplete(substring, wordLen, filter)
 	}
 }
 
@@ -153,7 +153,6 @@ func (t *trie) completeSubstring(nodeRef *node, prefix, substring string, level,
 		t.complete(nodeRef, wordLen, filter, prefix+substring, &res)
 
 		return res
-		//return t.autoComplete(prefix+substring, wordLen, filter)
 	}
 
 	if level >= wordLen {
@@ -171,7 +170,7 @@ func (t *trie) completeSubstring(nodeRef *node, prefix, substring string, level,
 	return res
 }
 
-func (t *trie) match(prefix string) int {
+func (t *trie) Match(prefix string) int {
 	nodeRef := t.root
 
 	for i := 0; i < len(prefix); i++ {
@@ -183,28 +182,6 @@ func (t *trie) match(prefix string) int {
 	}
 
 	return len(prefix)
-}
-
-func (h *HandleImplementor) insert(word string) {
-	h.trieRef.insert(word)
-}
-
-func (h *HandleImplementor) Lookup(word string) bool {
-	return h.trieRef.lookup(word)
-}
-
-func (h *HandleImplementor) AutoComplete(prefix string, wordLen int,
-	filter func(string) bool) []string {
-	return h.trieRef.autoComplete(prefix, wordLen, filter)
-}
-
-func (h *HandleImplementor) AutoCompleteSubstring(substring string, startLocation, wordLen int,
-	filter func(string) bool) []string {
-	return h.trieRef.autoCompleteSubstring(substring, startLocation, wordLen, filter)
-}
-
-func (h *HandleImplementor) Match(prefix string) int {
-	return h.trieRef.match(prefix)
 }
 
 // Wordle input is a jumbled string.
@@ -225,7 +202,7 @@ func (h *HandleImplementor) Wordle(wordle string, filter func(string) bool, maxR
 	res := make([]string, 0, max)
 
 	for _, permutation := range permutations {
-		if h.trieRef.lookup(permutation) {
+		if h.Lookup(permutation) {
 			res = append(res, permutation)
 
 			if len(res) >= max {

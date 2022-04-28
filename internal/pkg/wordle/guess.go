@@ -148,7 +148,7 @@ func (g *guessWork) next(status []int) string {
 	countMap := make(map[byte]int)
 	reusableSlotMap := make(map[byte][]int)
 	guesses := make(map[string]int)
-	maxFailures := 100
+	maxFailures := 1000
 
 	for i := 0; i < g.wordLen; i++ {
 		v := g.currentStatus[i]
