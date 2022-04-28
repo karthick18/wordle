@@ -55,7 +55,6 @@ func main() {
 		fmt.Println("Guess", guess)
 		fmt.Println("Enter status (0 - mismatch, 1 - position mismatch, 2 - matched). Attempt", attempts)
 		fmt.Scanf("%d %d %d %d %d", &status[0], &status[1], &status[2], &status[3], &status[4])
-		fmt.Println("status", status)
 	}
 
 	if guess == "" {
