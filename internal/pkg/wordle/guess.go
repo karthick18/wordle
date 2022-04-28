@@ -1,8 +1,9 @@
 package wordle
 
 import (
-	//	"fmt"
+	"fmt"
 	"math/rand"
+	"os"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type guessWork struct {
 	shuffle       []byte
 	usedMap       []int
 	currentStatus []int
+	memory        map[byte][]int
 }
 
 var (
@@ -43,11 +45,19 @@ func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
 		break
 	}
 
+	memory := make(map[byte][]int)
+
+	// note down the positions
+	for i, b := range shuffle {
+		memory[b] = append(memory[b], i)
+	}
+
 	g := &guessWork{
 		handle:  handle,
 		wordLen: wordLen,
 		shuffle: shuffle,
 		usedMap: usedMap,
+		memory:  memory,
 	}
 
 	g.mark(shuffle)
@@ -62,7 +72,7 @@ func (g *guessWork) get() string {
 func (g *guessWork) accept(part, word string, offset int) bool {
 	for i, v := range part {
 		// has a byte that has been marked absent
-		if g.usedMap[byte(v)-97] == 3 {
+		if g.usedMap[byte(v)-97] == 3 && g.currentStatus[offset+i] == 0 {
 			return false
 		}
 
@@ -83,7 +93,7 @@ func (g *guessWork) accept(part, word string, offset int) bool {
 					continue
 				}
 
-				if byte(b) == g.shuffle[offset+i] {
+				if byte(b) == g.shuffle[offset+i] && !g.findNote(byte(b), j) {
 					matched = true
 					break
 				}
@@ -99,6 +109,35 @@ func (g *guessWork) accept(part, word string, offset int) bool {
 
 }
 
+func (g *guessWork) addNote(guess []byte) {
+	for i, b := range g.shuffle {
+		if g.currentStatus[i] != 1 {
+			continue
+		}
+
+		// this has to be in the new guess. note down the slot
+		for j, b2 := range guess {
+			if i == j {
+				continue
+			}
+
+			if b2 == b {
+				g.memory[b] = append(g.memory[b], j)
+			}
+		}
+	}
+}
+
+func (g *guessWork) findNote(b byte, index int) bool {
+	for _, v := range g.memory[b] {
+		if v == index {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (g *guessWork) next(status []int) string {
 	g.currentStatus = status
 
@@ -108,6 +147,8 @@ func (g *guessWork) next(status []int) string {
 	currentEmptySlots := []int{}
 	countMap := make(map[byte]int)
 	reusableSlotMap := make(map[byte][]int)
+	guesses := make(map[string]int)
+	maxFailures := 100
 
 	for i := 0; i < g.wordLen; i++ {
 		v := g.currentStatus[i]
@@ -115,6 +156,7 @@ func (g *guessWork) next(status []int) string {
 		case 0:
 			// mark entry as removed from eligible slot
 			g.usedMap[int(g.shuffle[i])-97] = 3
+			delete(g.memory, g.shuffle[i])
 			emptySlots = append(emptySlots, i)
 		case 1:
 			shuffle[i] = g.shuffle[i]
@@ -196,14 +238,14 @@ func (g *guessWork) next(status []int) string {
 		switch {
 		case len(completions) > 1:
 			res := rand.Intn(len(completions))
+			g.markAndNote([]byte(completions[res]))
 			g.shuffle = []byte(completions[res])
-			g.mark(g.shuffle)
 
 			return string(g.shuffle)
 
 		case len(completions) == 1:
+			g.markAndNote([]byte(completions[0]))
 			g.shuffle = []byte(completions[0])
-			g.mark(g.shuffle)
 
 			return string(g.shuffle)
 
@@ -215,6 +257,17 @@ func (g *guessWork) next(status []int) string {
 	for {
 		frequentlyUsed := false
 		countMap := make(map[byte]int)
+
+		// move the reusable slot bytes to empty slots if available
+		// and make reusable slot empty
+		for _, reusableSlot := range reusableSlots {
+			if len(emptySlots) > 0 {
+				emptySlot := emptySlots[0]
+				emptySlots = emptySlots[1:]
+				shuffle[emptySlot] = g.shuffle[reusableSlot]
+				emptySlots = append(emptySlots, reusableSlot)
+			}
+		}
 
 		for _, b := range shuffle {
 			if int(b) == 0 {
@@ -241,7 +294,12 @@ func (g *guessWork) next(status []int) string {
 					continue
 				}
 
+				// already 2 same chars exist
 				if frequentlyUsed && countMap[b]+1 >= 2 {
+					continue
+				}
+
+				if g.currentStatus[slot] == 1 && b == g.shuffle[slot] {
 					continue
 				}
 
@@ -325,40 +383,54 @@ func (g *guessWork) next(status []int) string {
 				if byte(b) != g.shuffle[i] && g.currentStatus[i] == 2 {
 					return false
 				}
+
+				// check if this byte exists in the remaining and not in tried/noted list
+				if g.currentStatus[i] == 1 {
+					matched := false
+
+					for j, b := range word {
+						if i == j {
+							continue
+						}
+
+						if byte(b) == g.shuffle[i] && !g.findNote(byte(b), j) {
+							matched = true
+							break
+						}
+					}
+
+					if !matched {
+						return false
+					}
+				}
 			}
 
 			return true
 		}, 5)
 
-		// if no valid permutations are found, try swapping out reusable slots to see if we can find one
+		// if no valid permutations are found, retry if applicable
 		if len(matches) == 0 {
-
-			if len(reusableSlots) > 0 {
-				reusableSlot := reusableSlots[0]
-				reusableSlots = reusableSlots[1:]
-				currentEmptySlots = append(currentEmptySlots, reusableSlot)
-				emptySlots = []int{reusableSlot}
-
-				//retry again
-				continue
-			}
-
-			emptySlots = currentEmptySlots
-
 			if len(emptySlots) > 0 {
+				if guesses[string(shuffleBuffer)] >= maxFailures {
+					fmt.Fprintln(os.Stderr, "Exhausted shuffle buffer retries")
+					break
+				}
+
+				guesses[string(shuffleBuffer)]++
+				emptySlots = append([]int{}, currentEmptySlots...)
 				continue
 			}
 
 			// exhausted retries to find a word
+			fmt.Fprintln(os.Stderr, "No empty slots to retry")
 			break
 		}
 
 		matchedBuffer := matches[rand.Intn(len(matches))]
 
 		shuffleBuffer = []byte(matchedBuffer)
-
+		g.markAndNote(shuffleBuffer)
 		g.shuffle = shuffleBuffer
-		g.mark(g.shuffle)
 
 		return string(g.shuffle)
 	}
@@ -370,4 +442,11 @@ func (g *guessWork) mark(buffer []byte) {
 	for _, b := range buffer {
 		g.usedMap[int(b)-97] = 1
 	}
+}
+
+// this accesses the last buffer to note down the new positions.
+// this should be called before shuffle buffer is updated to new.
+func (g *guessWork) markAndNote(buffer []byte) {
+	g.mark(buffer)
+	g.addNote(buffer)
 }
