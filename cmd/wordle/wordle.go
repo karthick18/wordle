@@ -10,31 +10,14 @@ import (
 )
 
 func main() {
-	dict := "words_alpha.txt"
+	dict := "words.txt"
 	wordLen := 5
 	maxAttempts := 6
-	input := "cause"
 
 	flag.StringVar(&dict, "dict", dict, "Words dictionary file separated by newlines")
-	flag.StringVar(&input, "input", input, "Word to guess")
 	flag.IntVar(&maxAttempts, "max", maxAttempts, "Max attempts to guess the word")
 	flag.IntVar(&wordLen, "len", wordLen, "Wordlen to solve")
 	flag.Parse()
-
-	if len(input) != wordLen {
-		fmt.Fprintf(os.Stderr, "Wordlen %d and input %s length should be same\n", wordLen, input)
-		os.Exit(1)
-	}
-
-	seenMap := make(map[rune]bool)
-	for _, b := range input {
-		seenMap[b] = true
-	}
-
-	if len(seenMap) != len(input) {
-		fmt.Fprintf(os.Stderr, "Input %s cannot have letters repeated\n", input)
-		os.Exit(1)
-	}
 
 	f, err := os.Open(dict)
 	if err != nil {
@@ -61,6 +44,7 @@ func main() {
 	}
 
 	wh := wordle.New(words, wordLen)
+
 	var prev, guess string
 
 	attempts := 0
@@ -74,10 +58,14 @@ func main() {
 		fmt.Println("status", status)
 	}
 
-	if guess != input {
-		fmt.Fprintf(os.Stderr, "Exhausted guesses for wordle %s\n", input)
+	if guess == "" {
+		fmt.Fprintf(os.Stderr, "Exhausted guesses for wordle. Attempts %d\n", attempts)
 		os.Exit(1)
 	}
 
-	fmt.Println("Worldle word", input, "guessed in", attempts, "attempts")
+	if guess == prev {
+		fmt.Println("Wordle word", guess, "guessed in", attempts, "attempts")
+	} else {
+		fmt.Fprintf(os.Stderr, "Exhausted guesses for wordle. Attempts %d\n", attempts)
+	}
 }

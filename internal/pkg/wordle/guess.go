@@ -15,7 +15,7 @@ type guessWork struct {
 }
 
 var (
-	mostUsed = []byte{'a', 'e', 't', 's', 'd', 'm', 'p', 'c'}
+	mostUsed = []byte{'a', 'e', 't', 's', 'd', 'm', 'p', 'c', 'i', 'o'}
 )
 
 func init() {
@@ -28,11 +28,20 @@ func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
 
 	usedMap := make([]int, 26)
 
-	rand.Shuffle(len(shuffle), func(i, j int) {
-		shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
-	})
+	for {
+		rand.Shuffle(len(shuffle), func(i, j int) {
+			shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
+		})
 
-	shuffle = shuffle[:wordLen]
+		res := handle.Wordle(string(shuffle[:wordLen]), nil, 10)
+		if len(res) == 0 {
+			//			fmt.Println("res 0 for", string(shuffle[:wordLen]))
+			continue
+		}
+
+		shuffle = []byte(res[rand.Intn(len(res))])
+		break
+	}
 
 	g := &guessWork{
 		handle:  handle,
@@ -52,7 +61,7 @@ func (g *guessWork) get() string {
 
 func (g *guessWork) accept(part, word string, offset int) bool {
 	for i, v := range part {
-		// has an unused byte
+		// has a byte that has been marked absent
 		if g.usedMap[byte(v)-97] == 3 {
 			return false
 		}
@@ -89,35 +98,62 @@ func (g *guessWork) accept(part, word string, offset int) bool {
 	return true
 
 }
+
 func (g *guessWork) next(status []int) string {
 	g.currentStatus = status
 
 	shuffle := make([]byte, g.wordLen)
 	emptySlots := []int{}
-	matched := 0
+	reusableSlots := []int{}
+	currentEmptySlots := []int{}
+	countMap := make(map[byte]int)
+	reusableSlotMap := make(map[byte][]int)
 
 	for i := 0; i < g.wordLen; i++ {
 		v := g.currentStatus[i]
-		if v > 0 {
-			g.usedMap[int(g.shuffle[i])-97] = 2
-			shuffle[i] = g.shuffle[i]
-			matched++
-
-			continue
-		}
-
-		// mark entry as removed from usedmap
-		// make sure we don't delete a duplicate byte whose status has been marked as 1/2 and 0
-		if g.usedMap[int(g.shuffle[i])-97] != 2 {
+		switch v {
+		case 0:
+			// mark entry as removed from eligible slot
 			g.usedMap[int(g.shuffle[i])-97] = 3
+			emptySlots = append(emptySlots, i)
+		case 1:
+			shuffle[i] = g.shuffle[i]
+			if g.usedMap[int(g.shuffle[i])-97] != 2 {
+				g.usedMap[int(g.shuffle[i])-97] = 1
+			}
+
+			if countMap[g.shuffle[i]] > 1 {
+				// mark it as a duplicate that can be reused
+				if len(reusableSlotMap[g.shuffle[i]]) > 0 {
+					reusableSlots = append(reusableSlots, reusableSlotMap[g.shuffle[i]]...)
+					reusableSlotMap[g.shuffle[i]] = []int{}
+				}
+
+				reusableSlots = append(reusableSlots, i)
+			} else {
+				// mark it as a candidate for reuse
+				reusableSlotMap[g.shuffle[i]] = append(reusableSlotMap[g.shuffle[i]], i)
+			}
+
+			countMap[g.shuffle[i]] += 1
+		case 2:
+			countMap[g.shuffle[i]] += 1
+			shuffle[i] = g.shuffle[i]
+			g.usedMap[int(g.shuffle[i])-97] = 2
+
+			if len(reusableSlotMap[g.shuffle[i]]) > 0 {
+				reusableSlots = append(reusableSlots, reusableSlotMap[g.shuffle[i]]...)
+				reusableSlotMap[g.shuffle[i]] = []int{}
+			}
 		}
 
-		emptySlots = append(emptySlots, i)
 	}
 
 	if string(shuffle) == string(g.shuffle) {
 		return string(shuffle)
 	}
+
+	currentEmptySlots = append(currentEmptySlots, emptySlots...)
 
 	// check for consecutive matches and try autocomplete with filter
 	// check for the first consecutive match start and end location
@@ -141,15 +177,6 @@ func (g *guessWork) next(status []int) string {
 			func(word string) bool {
 				prefix := word[:startLocation]
 				suffix := word[endLocation+1:]
-				seenMap := make(map[rune]bool)
-
-				for _, b := range word {
-					if seenMap[b] {
-						return false
-					}
-
-					seenMap[b] = true
-				}
 
 				if len(prefix) > 0 {
 					if !g.accept(prefix, word, 0) {
@@ -185,149 +212,158 @@ func (g *guessWork) next(status []int) string {
 		}
 	}
 
-	eligible := []byte{}
-	needed := g.wordLen - matched
+	for {
+		frequentlyUsed := false
+		countMap := make(map[byte]int)
 
-	if needed > 0 {
-		for i, v := range g.usedMap {
-			if v > 0 {
+		for _, b := range shuffle {
+			if int(b) == 0 {
 				continue
 			}
 
-			eligible = append(eligible, byte(97+i))
-		}
-	}
-
-	// nothing left to try
-	if len(eligible) < needed {
-		//		fmt.Println("eligible set", eligible, "needed", needed)
-
-		return ""
-	}
-
-	seenMap := make(map[int]bool)
-
-	for i := 0; i < needed; i++ {
-		slot := emptySlots[i]
-
-		for {
-			eligibleIndex := rand.Intn(len(eligible))
-			if seenMap[eligibleIndex] {
-				continue
+			countMap[b] += 1
+			if countMap[b] >= 2 {
+				frequentlyUsed = true
 			}
-
-			seenMap[eligibleIndex] = true
-			shuffle[slot] = eligible[eligibleIndex]
-			break
 		}
-	}
 
-	allowedIndicesMap := make(map[int][]int)
-
-	for i := range shuffle {
-		v := g.currentStatus[i]
-		if v == 2 {
-			allowedIndicesMap[i] = append(allowedIndicesMap[i], i)
-		} else {
-			for j := range shuffle {
-				if i == j {
+		for _, slot := range emptySlots {
+			for {
+				eligibleIndex := rand.Intn(len(g.usedMap))
+				// skip if marked absent
+				if g.usedMap[eligibleIndex] == 3 {
 					continue
 				}
 
-				if g.currentStatus[j] == 2 {
+				b := byte(int('a') + eligibleIndex)
+
+				if countMap[b] >= 2 {
 					continue
 				}
 
-				allowedIndicesMap[i] = append(allowedIndicesMap[i], j)
-			}
+				if frequentlyUsed && countMap[b]+1 >= 2 {
+					continue
+				}
 
-			if len(allowedIndicesMap[i]) == 0 {
+				countMap[b] += 1
+				if countMap[b] > 1 {
+					frequentlyUsed = true
+				}
+
+				shuffle[slot] = b
+				break
+			}
+		}
+
+		allowedIndicesMap := make(map[int][]int)
+
+		for i := range shuffle {
+			v := g.currentStatus[i]
+			if v == 2 {
 				allowedIndicesMap[i] = append(allowedIndicesMap[i], i)
+			} else {
+				for j := range shuffle {
+					if i == j {
+						continue
+					}
+
+					if g.currentStatus[j] == 2 {
+						continue
+					}
+
+					// check if this is a duplicate byte
+					// in which case it cannot be assigned to another duplicate byte/pinned location
+					if v == 1 && byte(shuffle[i]) == byte(shuffle[j]) {
+						continue
+					}
+
+					allowedIndicesMap[i] = append(allowedIndicesMap[i], j)
+				}
+
+				if len(allowedIndicesMap[i]) == 0 {
+					allowedIndicesMap[i] = append(allowedIndicesMap[i], i)
+				}
 			}
 		}
-	}
 
-	shuffleBuffer := make([]byte, len(shuffle))
-	copy(shuffleBuffer, shuffle)
+		shuffleBuffer := make([]byte, len(shuffle))
+		copy(shuffleBuffer, shuffle)
 
-	// for i := range shuffle {
-	// 	fmt.Println("allowed index map", i, allowedIndicesMap[i])
-	// }
-
-	seenMap = make(map[int]bool)
-
-	for i := range shuffle {
-		var shuffleIndex int
-
-		for {
+		for i := range shuffle {
 			allowedIndex := rand.Intn(len(allowedIndicesMap[i]))
-			shuffleIndex = allowedIndicesMap[i][allowedIndex]
-			if seenMap[shuffleIndex] {
-				//fmt.Println("shuffle index", shuffleIndex, "seen")
+			shuffleIndex := allowedIndicesMap[i][allowedIndex]
+			shuffleBuffer[i] = shuffle[shuffleIndex]
+
+			//fmt.Println("allowed map", allowedIndicesMap[i], "shuffle index", shuffleIndex, "index", i)
+
+			if g.currentStatus[shuffleIndex] == 2 {
 				continue
 			}
 
-			seenMap[shuffleIndex] = true
-			shuffleBuffer[i] = shuffle[shuffleIndex]
-			break
+			//remove shuffle index from subsequent allowed indices map
+			for j := i + 1; j < len(shuffle); j++ {
+				for k, v := range allowedIndicesMap[j] {
+					if v == shuffleIndex {
+						allowedIndicesMap[j] = append(allowedIndicesMap[j][:k], allowedIndicesMap[j][k+1:]...)
+						break
+					}
+				}
+
+				if len(allowedIndicesMap[j]) == 0 {
+					allowedIndicesMap[j] = append(allowedIndicesMap[j], j)
+				}
+			}
 		}
 
-		//fmt.Println("allowed map", allowedIndicesMap[i], "shuffle index", shuffleIndex, "index", i)
+		// take permutations and get eligible words
+		matches := g.handle.Wordle(string(shuffleBuffer), func(word string) bool {
+			for i, b := range word {
+				if byte(b) == g.shuffle[i] && g.currentStatus[i] < 2 {
+					return false
+				}
 
-		if g.currentStatus[shuffleIndex] == 2 {
-			continue
-		}
-
-		//remove shuffle index from subsequent allowed indices map
-		for j := i + 1; j < len(shuffle); j++ {
-			for k, v := range allowedIndicesMap[j] {
-				if v == shuffleIndex {
-					allowedIndicesMap[j] = append(allowedIndicesMap[j][:k], allowedIndicesMap[j][k+1:]...)
-					break
+				if byte(b) != g.shuffle[i] && g.currentStatus[i] == 2 {
+					return false
 				}
 			}
 
-			if len(allowedIndicesMap[j]) == 0 {
-				allowedIndicesMap[j] = append(allowedIndicesMap[j], j)
+			return true
+		}, 5)
+
+		// if no valid permutations are found, try swapping out reusable slots to see if we can find one
+		if len(matches) == 0 {
+
+			if len(reusableSlots) > 0 {
+				reusableSlot := reusableSlots[0]
+				reusableSlots = reusableSlots[1:]
+				currentEmptySlots = append(currentEmptySlots, reusableSlot)
+				emptySlots = []int{reusableSlot}
+
+				//retry again
+				continue
 			}
-		}
-	}
 
-	// take permutations and select longest trie match on eligible permutation
-	permutations := Permutations(string(shuffleBuffer), func(word string) bool {
-		for i, b := range word {
-			if byte(b) == g.shuffle[i] && g.currentStatus[i] < 2 {
-				return false
+			emptySlots = currentEmptySlots
+
+			if len(emptySlots) > 0 {
+				continue
 			}
 
-			if byte(b) != g.shuffle[i] && g.currentStatus[i] == 2 {
-				return false
-			}
+			// exhausted retries to find a word
+			break
 		}
 
-		return true
-	})
+		matchedBuffer := matches[rand.Intn(len(matches))]
 
-	longestMatch := 1
-	matchedBuffer := ""
-
-	for _, p := range permutations {
-		match := g.handle.Match(p)
-
-		if match > longestMatch {
-			longestMatch = match
-			matchedBuffer = p
-		}
-	}
-
-	if matchedBuffer != "" {
 		shuffleBuffer = []byte(matchedBuffer)
+
+		g.shuffle = shuffleBuffer
+		g.mark(g.shuffle)
+
+		return string(g.shuffle)
 	}
 
-	g.shuffle = shuffleBuffer
-	g.mark(g.shuffle)
-
-	return string(g.shuffle)
+	return ""
 }
 
 func (g *guessWork) mark(buffer []byte) {

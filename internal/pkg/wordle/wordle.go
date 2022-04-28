@@ -10,7 +10,7 @@ type node struct {
 }
 
 type Handle interface {
-	Wordle(string, ...int) []string
+	Wordle(string, func(string) bool, ...int) []string
 	Start() string
 	Next(status []int) string
 }
@@ -24,11 +24,12 @@ var _ Handle = &HandleImplementor{}
 
 func New(words []string, wordLen int) *HandleImplementor {
 	handle := newHandle(wordLen)
-	handle.guessRef = newGuess(handle, wordLen)
 
 	for _, word := range words {
 		handle.insert(word)
 	}
+
+	handle.guessRef = newGuess(handle, wordLen)
 
 	return handle
 }
@@ -148,7 +149,11 @@ func (t *trie) completeSubstring(nodeRef *node, prefix, substring string, level,
 		}
 
 		//we can autocomplete now
-		return t.autoComplete(prefix+substring, wordLen, filter)
+		var res []string
+		t.complete(nodeRef, wordLen, filter, prefix+substring, &res)
+
+		return res
+		//return t.autoComplete(prefix+substring, wordLen, filter)
 	}
 
 	if level >= wordLen {
@@ -184,6 +189,10 @@ func (h *HandleImplementor) insert(word string) {
 	h.trieRef.insert(word)
 }
 
+func (h *HandleImplementor) Lookup(word string) bool {
+	return h.trieRef.lookup(word)
+}
+
 func (h *HandleImplementor) AutoComplete(prefix string, wordLen int,
 	filter func(string) bool) []string {
 	return h.trieRef.autoComplete(prefix, wordLen, filter)
@@ -200,8 +209,8 @@ func (h *HandleImplementor) Match(prefix string) int {
 
 // Wordle input is a jumbled string.
 // Make permutations and check if any matches a word in a dictionary.
-func (h *HandleImplementor) Wordle(wordle string, maxResults ...int) []string {
-	permutations := Permutations(wordle, nil)
+func (h *HandleImplementor) Wordle(wordle string, filter func(string) bool, maxResults ...int) []string {
+	permutations := Permutations(wordle, filter)
 
 	max := 1
 
@@ -220,13 +229,10 @@ func (h *HandleImplementor) Wordle(wordle string, maxResults ...int) []string {
 			res = append(res, permutation)
 
 			if len(res) >= max {
-				return res
+				break
 			}
 		}
 	}
-
-	// no match. Shouldn't happen
-	res = append(res, wordle)
 
 	return res
 }
