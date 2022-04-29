@@ -149,6 +149,7 @@ func (g *guessWork) next(status []int) string {
 	reusableSlotMap := make(map[byte][]int)
 	guesses := make(map[string]int)
 	maxFailures := 100
+	matches := 0
 
 	for i := 0; i < g.wordLen; i++ {
 		v := g.currentStatus[i]
@@ -179,6 +180,7 @@ func (g *guessWork) next(status []int) string {
 
 			countMap[g.shuffle[i]] += 1
 		case 2:
+			matches++
 			countMap[g.shuffle[i]] += 1
 			shuffle[i] = g.shuffle[i]
 			g.usedMap[int(g.shuffle[i])-97] = 2
@@ -191,7 +193,7 @@ func (g *guessWork) next(status []int) string {
 
 	}
 
-	if string(shuffle) == string(g.shuffle) {
+	if matches >= g.wordLen {
 		return string(shuffle)
 	}
 
