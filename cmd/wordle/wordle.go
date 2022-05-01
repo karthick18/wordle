@@ -49,12 +49,17 @@ func main() {
 
 	attempts := 0
 	status := make([]int, wordLen)
+	state := make([]wordle.State, len(status))
 
-	for prev, guess = "", wh.Start(); attempts < maxAttempts && guess != "" && prev != guess; prev, guess = guess, wh.Next(status) {
+	for prev, guess = "", wh.Start(); attempts < maxAttempts && guess != "" && prev != guess; prev, guess = guess, wh.Next(state) {
 		attempts++
 		fmt.Println("Guess", guess)
 		fmt.Println("Enter status (0 - mismatch, 1 - position mismatch, 2 - matched). Attempt", attempts)
 		fmt.Scanf("%d %d %d %d %d", &status[0], &status[1], &status[2], &status[3], &status[4])
+
+		if state, err = wordle.ToState(status); err != nil {
+			panic(err.Error())
+		}
 	}
 
 	if guess == "" {

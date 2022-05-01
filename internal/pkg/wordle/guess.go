@@ -1,6 +1,7 @@
 package wordle
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -11,13 +12,27 @@ type guessWork struct {
 	handle        *HandleImplementor
 	wordLen       int
 	shuffle       []byte
-	usedMap       []int
-	currentStatus []int
-	memory        map[byte][]int
+	usedMap       []State
+	currentStatus []State
+	cache         map[byte][]int
 }
 
+type State int
+
+const (
+	alphabets    = 26
+	alphabetBase = int('a')
+)
+
+const (
+	Present State = iota + 1
+	Locked
+	Deleted
+)
+
 var (
-	mostUsed = []byte{'a', 'e', 't', 's', 'd', 'm', 'p', 'c', 'i', 'o'}
+	mostUsedLetters  = []byte{'a', 'e', 't', 's', 'd', 'n', 'p', 'h', 'i', 'o', 'r', 'w'}
+	ErrInvalidStatus = errors.New("invalid status value. allowed (0/1/2)")
 )
 
 func init() {
@@ -25,10 +40,10 @@ func init() {
 }
 
 func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
-	shuffle := make([]byte, len(mostUsed))
-	copy(shuffle, mostUsed)
+	shuffle := make([]byte, len(mostUsedLetters))
+	copy(shuffle, mostUsedLetters)
 
-	usedMap := make([]int, 26)
+	usedMap := make([]State, alphabets)
 
 	for {
 		rand.Shuffle(len(shuffle), func(i, j int) {
@@ -37,7 +52,6 @@ func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
 
 		res := handle.Wordle(string(shuffle[:wordLen]), nil, 10)
 		if len(res) == 0 {
-			//			fmt.Println("res 0 for", string(shuffle[:wordLen]))
 			continue
 		}
 
@@ -45,11 +59,11 @@ func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
 		break
 	}
 
-	memory := make(map[byte][]int)
+	cache := make(map[byte][]int)
 
 	// note down the positions
 	for i, b := range shuffle {
-		memory[b] = append(memory[b], i)
+		cache[b] = append(cache[b], i)
 	}
 
 	g := &guessWork{
@@ -57,7 +71,7 @@ func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
 		wordLen: wordLen,
 		shuffle: shuffle,
 		usedMap: usedMap,
-		memory:  memory,
+		cache:   cache,
 	}
 
 	g.mark(shuffle)
@@ -65,35 +79,66 @@ func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
 	return g
 }
 
+func ToState(status []int) ([]State, error) {
+	state := make([]State, len(status))
+
+	for i, v := range status {
+		switch v {
+		case 0:
+			state[i] = Deleted
+		case 1:
+			state[i] = Present
+		case 2:
+			state[i] = Locked
+		default:
+			return nil, ErrInvalidStatus
+		}
+	}
+
+	return state, nil
+}
+
 func (g *guessWork) get() string {
 	return string(g.shuffle)
 }
 
-func (g *guessWork) accept(part, word string, offset int) bool {
-	for i, v := range part {
-		// has a byte that has been marked absent
-		if g.usedMap[byte(v)-97] == 3 && g.currentStatus[offset+i] == 0 {
+func (g *guessWork) accept(word string, countMap map[byte]int) bool {
+	for i, v := range word {
+		if byte(v) == g.shuffle[i] {
+			if g.currentStatus[i] == Locked {
+				continue
+			}
+
 			return false
 		}
 
-		if byte(v) == g.shuffle[offset+i] && g.currentStatus[offset+i] < 2 {
+		if byte(v) != g.shuffle[i] && g.currentStatus[i] == Locked {
 			return false
 		}
 
-		if byte(v) != g.shuffle[offset+i] && g.currentStatus[offset+i] == 2 {
-			return false
+		if g.usedMap[int(v)-alphabetBase] == Deleted {
+			count := 0
+			for _, b := range word {
+				if byte(b) == byte(v) {
+					count++
+				}
+			}
+
+			if count != countMap[byte(v)] {
+				return false
+			}
 		}
 
 		// if there is a position mismatch, this has to be found in the remaining
-		if g.currentStatus[offset+i] == 1 {
+		if g.currentStatus[i] == Present {
 			matched := false
 
 			for j, b := range word {
-				if j == offset+i {
+				if j == i {
 					continue
 				}
 
-				if byte(b) == g.shuffle[offset+i] && !g.findNote(byte(b), j) {
+				if byte(b) == g.shuffle[i] && !g.findCache(byte(b), j) {
 					matched = true
 					break
 				}
@@ -109,7 +154,7 @@ func (g *guessWork) accept(part, word string, offset int) bool {
 
 }
 
-func (g *guessWork) addNote(guess []byte) {
+func (g *guessWork) addCache(guess []byte) {
 	for i, b := range g.shuffle {
 		if g.currentStatus[i] != 1 {
 			continue
@@ -122,14 +167,14 @@ func (g *guessWork) addNote(guess []byte) {
 			}
 
 			if b2 == b {
-				g.memory[b] = append(g.memory[b], j)
+				g.cache[b] = append(g.cache[b], j)
 			}
 		}
 	}
 }
 
-func (g *guessWork) findNote(b byte, index int) bool {
-	for _, v := range g.memory[b] {
+func (g *guessWork) findCache(b byte, index int) bool {
+	for _, v := range g.cache[b] {
 		if v == index {
 			return true
 		}
@@ -138,7 +183,7 @@ func (g *guessWork) findNote(b byte, index int) bool {
 	return false
 }
 
-func (g *guessWork) next(status []int) string {
+func (g *guessWork) next(status []State) string {
 	g.currentStatus = status
 
 	shuffle := make([]byte, g.wordLen)
@@ -148,21 +193,21 @@ func (g *guessWork) next(status []int) string {
 	countMap := make(map[byte]int)
 	reusableSlotMap := make(map[byte][]int)
 	guesses := make(map[string]int)
-	maxFailures := 100
+	maxFailures := 50
 	matches := 0
 
 	for i := 0; i < g.wordLen; i++ {
 		v := g.currentStatus[i]
 		switch v {
-		case 0:
+		case Deleted:
 			// mark entry as removed from eligible slot
-			g.usedMap[int(g.shuffle[i])-97] = 3
-			delete(g.memory, g.shuffle[i])
+			g.usedMap[int(g.shuffle[i])-alphabetBase] = Deleted
+			delete(g.cache, g.shuffle[i])
 			emptySlots = append(emptySlots, i)
-		case 1:
+		case Present:
 			shuffle[i] = g.shuffle[i]
-			if g.usedMap[int(g.shuffle[i])-97] != 2 {
-				g.usedMap[int(g.shuffle[i])-97] = 1
+			if g.usedMap[int(g.shuffle[i])-alphabetBase] != Deleted {
+				g.usedMap[int(g.shuffle[i])-alphabetBase] = Present
 			}
 
 			if countMap[g.shuffle[i]] > 1 {
@@ -179,11 +224,13 @@ func (g *guessWork) next(status []int) string {
 			}
 
 			countMap[g.shuffle[i]] += 1
-		case 2:
+		case Locked:
 			matches++
 			countMap[g.shuffle[i]] += 1
 			shuffle[i] = g.shuffle[i]
-			g.usedMap[int(g.shuffle[i])-97] = 2
+			if g.usedMap[int(g.shuffle[i])-alphabetBase] != Deleted {
+				g.usedMap[int(g.shuffle[i])-alphabetBase] = Locked
+			}
 
 			if len(reusableSlotMap[g.shuffle[i]]) > 0 {
 				reusableSlots = append(reusableSlots, reusableSlotMap[g.shuffle[i]]...)
@@ -204,7 +251,7 @@ func (g *guessWork) next(status []int) string {
 	startLocation, endLocation := -1, -1
 
 	for i := 0; i < len(g.shuffle)-1; i++ {
-		if g.currentStatus[i] == 2 && g.currentStatus[i+1] == 2 {
+		if g.currentStatus[i] == Locked && g.currentStatus[i+1] == Locked {
 			if startLocation < 0 {
 				startLocation = i
 			}
@@ -219,37 +266,17 @@ func (g *guessWork) next(status []int) string {
 	if startLocation >= 0 {
 		completions := g.handle.AutoCompleteSubstring(string(g.shuffle[startLocation:endLocation+1]), startLocation, g.wordLen,
 			func(word string) bool {
-				prefix := word[:startLocation]
-				suffix := word[endLocation+1:]
-
-				if len(prefix) > 0 {
-					if !g.accept(prefix, word, 0) {
-						return false
-					}
-				}
-
-				if len(suffix) > 0 {
-					if !g.accept(suffix, word, endLocation+1) {
-						return false
-					}
-				}
-
-				return true
+				return g.accept(word, countMap)
 			})
 
 		switch {
 		case len(completions) > 1:
 			res := rand.Intn(len(completions))
-			g.markAndNote([]byte(completions[res]))
-			g.shuffle = []byte(completions[res])
 
-			return string(g.shuffle)
+			return g.update([]byte(completions[res]))
 
 		case len(completions) == 1:
-			g.markAndNote([]byte(completions[0]))
-			g.shuffle = []byte(completions[0])
-
-			return string(g.shuffle)
+			return g.update([]byte(completions[0]))
 
 		default:
 			break
@@ -285,12 +312,12 @@ func (g *guessWork) next(status []int) string {
 		for _, slot := range emptySlots {
 			for {
 				eligibleIndex := rand.Intn(len(g.usedMap))
-				// skip if marked absent
-				if g.usedMap[eligibleIndex] == 3 {
+				// skip if marked deleted
+				if g.usedMap[eligibleIndex] == Deleted {
 					continue
 				}
 
-				b := byte(int('a') + eligibleIndex)
+				b := byte(alphabetBase + eligibleIndex)
 
 				if countMap[b] >= 2 {
 					continue
@@ -301,7 +328,8 @@ func (g *guessWork) next(status []int) string {
 					continue
 				}
 
-				if g.currentStatus[slot] == 1 && b == g.shuffle[slot] {
+				// already has a position mismatch
+				if g.currentStatus[slot] == Present && b == g.shuffle[slot] {
 					continue
 				}
 
@@ -319,7 +347,7 @@ func (g *guessWork) next(status []int) string {
 
 		for i := range shuffle {
 			v := g.currentStatus[i]
-			if v == 2 {
+			if v == Locked {
 				allowedIndicesMap[i] = append(allowedIndicesMap[i], i)
 			} else {
 				for j := range shuffle {
@@ -327,13 +355,13 @@ func (g *guessWork) next(status []int) string {
 						continue
 					}
 
-					if g.currentStatus[j] == 2 {
+					if g.currentStatus[j] == Locked {
 						continue
 					}
 
 					// check if this is a duplicate byte
 					// in which case it cannot be assigned to another duplicate byte/pinned location
-					if v == 1 && byte(shuffle[i]) == byte(shuffle[j]) {
+					if v == Present && byte(shuffle[i]) == byte(shuffle[j]) {
 						continue
 					}
 
@@ -354,9 +382,7 @@ func (g *guessWork) next(status []int) string {
 			shuffleIndex := allowedIndicesMap[i][allowedIndex]
 			shuffleBuffer[i] = shuffle[shuffleIndex]
 
-			//fmt.Println("allowed map", allowedIndicesMap[i], "shuffle index", shuffleIndex, "index", i)
-
-			if g.currentStatus[shuffleIndex] == 2 {
+			if g.currentStatus[shuffleIndex] == Locked {
 				continue
 			}
 
@@ -377,37 +403,7 @@ func (g *guessWork) next(status []int) string {
 
 		// take permutations and get eligible words
 		matches := g.handle.Wordle(string(shuffleBuffer), func(word string) bool {
-			for i, b := range word {
-				if byte(b) == g.shuffle[i] && g.currentStatus[i] < 2 {
-					return false
-				}
-
-				if byte(b) != g.shuffle[i] && g.currentStatus[i] == 2 {
-					return false
-				}
-
-				// check if this byte exists in the remaining and not in tried/noted list
-				if g.currentStatus[i] == 1 {
-					matched := false
-
-					for j, b := range word {
-						if i == j {
-							continue
-						}
-
-						if byte(b) == g.shuffle[i] && !g.findNote(byte(b), j) {
-							matched = true
-							break
-						}
-					}
-
-					if !matched {
-						return false
-					}
-				}
-			}
-
-			return true
+			return g.accept(word, countMap)
 		}, 5)
 
 		// if no valid permutations are found, retry if applicable
@@ -431,10 +427,7 @@ func (g *guessWork) next(status []int) string {
 		matchedBuffer := matches[rand.Intn(len(matches))]
 
 		shuffleBuffer = []byte(matchedBuffer)
-		g.markAndNote(shuffleBuffer)
-		g.shuffle = shuffleBuffer
-
-		return string(g.shuffle)
+		return g.update(shuffleBuffer)
 	}
 
 	return ""
@@ -442,13 +435,16 @@ func (g *guessWork) next(status []int) string {
 
 func (g *guessWork) mark(buffer []byte) {
 	for _, b := range buffer {
-		g.usedMap[int(b)-97] = 1
+		g.usedMap[int(b)-alphabetBase] = Present
 	}
 }
 
-// this accesses the last buffer to note down the new positions.
-// this should be called before shuffle buffer is updated to new.
-func (g *guessWork) markAndNote(buffer []byte) {
+// update adds the letter positions to the cache
+// and also updates the shuffle buffer
+func (g *guessWork) update(buffer []byte) string {
 	g.mark(buffer)
-	g.addNote(buffer)
+	g.addCache(buffer)
+	g.shuffle = buffer
+
+	return string(g.shuffle)
 }

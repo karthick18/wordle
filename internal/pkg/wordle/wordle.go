@@ -12,7 +12,7 @@ type node struct {
 type Handle interface {
 	Wordle(string, func(string) bool, ...int) []string
 	Start() string
-	Next(status []int) string
+	Next(state []State) string
 }
 
 type HandleImplementor struct {
@@ -218,6 +218,6 @@ func (h *HandleImplementor) Start() string {
 	return h.guessRef.get()
 }
 
-func (h *HandleImplementor) Next(status []int) string {
-	return h.guessRef.next(status)
+func (h *HandleImplementor) Next(state []State) string {
+	return h.guessRef.next(state)
 }
