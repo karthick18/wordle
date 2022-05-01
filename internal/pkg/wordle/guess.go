@@ -435,7 +435,9 @@ func (g *guessWork) next(status []State) string {
 
 func (g *guessWork) mark(buffer []byte) {
 	for _, b := range buffer {
-		g.usedMap[int(b)-alphabetBase] = Present
+		if g.usedMap[int(b)-alphabetBase] != Deleted {
+			g.usedMap[int(b)-alphabetBase] = Present
+		}
 	}
 }
 
