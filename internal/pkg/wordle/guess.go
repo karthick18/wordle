@@ -60,7 +60,7 @@ func newGuess(handle *HandleImplementor, wordLen int) *guessWork {
 	}
 
 	cache := make(map[byte][]int)
-	shuffle = []byte{'f', 'l', 'o', 'w', 'n'}
+
 	// note down the positions
 	for i, b := range shuffle {
 		cache[b] = append(cache[b], i)

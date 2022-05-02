@@ -187,7 +187,7 @@ func (t *trie) Match(prefix string) int {
 // Wordle input is a jumbled string.
 // Make permutations and check if any matches a word in a dictionary.
 func (h *HandleImplementor) Wordle(wordle string, filter func(string) bool, maxResults ...int) []string {
-	permutations := Permutations(wordle, filter)
+	permutations := Permutations(wordle, nil)
 
 	max := 1
 
@@ -203,7 +203,13 @@ func (h *HandleImplementor) Wordle(wordle string, filter func(string) bool, maxR
 
 	for _, permutation := range permutations {
 		if h.Lookup(permutation) {
-			res = append(res, permutation)
+			if filter != nil {
+				if filter(permutation) {
+					res = append(res, permutation)
+				}
+			} else {
+				res = append(res, permutation)
+			}
 
 			if len(res) >= max {
 				break
