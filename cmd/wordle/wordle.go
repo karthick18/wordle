@@ -10,14 +10,19 @@ import (
 )
 
 func main() {
-	dict := "words.txt"
-	wordLen := 5
-	maxAttempts := 6
+	dict := "words_alpha.txt"
+	wordLen := 6
+	maxAttempts := 12
 
 	flag.StringVar(&dict, "dict", dict, "Words dictionary file separated by newlines")
 	flag.IntVar(&maxAttempts, "max", maxAttempts, "Max attempts to guess the word")
 	flag.IntVar(&wordLen, "len", wordLen, "Wordlen to solve")
 	flag.Parse()
+
+	if wordLen != 5 && wordLen != 6 {
+		fmt.Fprintln(os.Stderr, "Supported wordlens (5, 6)")
+		os.Exit(1)
+	}
 
 	f, err := os.Open(dict)
 	if err != nil {
@@ -55,7 +60,15 @@ func main() {
 		attempts++
 		fmt.Println("Guess", guess)
 		fmt.Println("Enter status (0 - mismatch, 1 - position mismatch, 2 - matched). Attempt", attempts)
-		fmt.Scanf("%d %d %d %d %d", &status[0], &status[1], &status[2], &status[3], &status[4])
+		switch {
+		case wordLen == 5:
+			fmt.Scanf("%d %d %d %d %d", &status[0], &status[1], &status[2], &status[3], &status[4])
+		case wordLen == 6:
+			fmt.Scanf("%d %d %d %d %d %d", &status[0], &status[1], &status[2], &status[3], &status[4], &status[5])
+		default:
+			fmt.Fprintf(os.Stderr, "Unsupported wordlen: %d\n", wordLen)
+			os.Exit(1)
+		}
 
 		if state, err = wordle.ToState(status); err != nil {
 			panic(err.Error())
