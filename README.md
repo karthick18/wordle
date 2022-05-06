@@ -1,4 +1,3 @@
-# wordle
 ## Wordle solver
 
 **Download and install [Go](https://go.dev/doc/install)**
